@@ -300,12 +300,13 @@ This encrypts "annual" using the 23rd character of the OTP, treating it as a 24-
 
 | Argument | Description |
 |----------|-------------|
+| `-h, --help` | Show help message and exit |
 | `-seed` | BIP-39 seed phrase (1, 12, or 24 words or indices) |
 | `-offset` | Caesar cipher offset (non-negative integer) |
 | `-otp` | One-Time Password (or `GENERATE` for random) |
 | `-prime` | Prime number >2048 for SSS (or `GENERATE` for random) |
 | `-s N K` | Create N shares requiring K to reconstruct |
-| `-embed` | Embed offset/OTP in SSS shares (requires `-s`) |
+| `-embed` | ⚠️ **Embed offset/OTP in SSS shares** (requires `-s`) - See security warning below |
 | `-sf FILE` | Reconstruct from Shamir shares file |
 | `-decrypt` | Decrypt instead of encrypt |
 | `-i X/Y` | Use OTP character at position X for Y-word phrase |
@@ -313,11 +314,29 @@ This encrypts "annual" using the 23rd character of the OTP, treating it as a 24-
 | `-debug` | Show intermediate cipher values |
 | `-gui` | Launch graphical interface |
 
+### ⚠️ Security Warning: `-embed` Option
+
+The `-embed` flag includes your **offset** and **OTP** directly in the SSS shares, making reconstruction easier but **significantly less secure**:
+
+**Risks of using `-embed`:**
+- ❌ **Single Point of Failure**: If an attacker obtains K shares, they have EVERYTHING needed to decrypt your seed phrase
+- ❌ **No Additional Security Layer**: Offset and OTP provide no protection if shares are compromised
+- ❌ **Lost Redundancy**: You lose the benefit of storing decryption parameters separately
+- ❌ **Increased Attack Surface**: Each share becomes a complete decryption package
+
+**Benefits of NOT using `-embed` (recommended):**
+- ✅ **Defense in Depth**: Attacker needs K shares AND separately stored offset/OTP/prime
+- ✅ **Multiple Storage Locations**: Parameters can be memorized, stored separately, or written down
+- ✅ **Better Security**: Even if K shares are stolen, seed phrase remains protected without parameters
+- ✅ **Flexible Recovery**: Can change storage method for parameters without regenerating shares
+
+**Recommendation**: Only use `-embed` if you understand the trade-offs and have a specific reason (e.g., you cannot reliably store parameters separately). For maximum security, **DO NOT use `-embed`** and store offset/OTP/prime in separate secure locations.
+
 ---
 
 ## 🧪 Examples
 
-### Example 1: Encrypt with embedded SSS
+### Example 1: Encrypt with embedded SSS (⚠️ Lower Security)
 
 ```bash
 python3 encoder.py \
@@ -335,7 +354,9 @@ python3 encoder.py \
 - Any 4 shares can reconstruct the secret
 - No need to remember offset, OTP, or prime (embedded in shares)
 
-### Example 2: GUI Workflow - Complete Encryption & SSS
+**⚠️ Security Note**: This example uses `-embed` for convenience, but reduces security. For maximum protection, omit `-embed` and store offset/OTP/prime separately from the shares. See the `-embed` security warning in the Command-Line Arguments section.
+
+### Example 2: GUI Workflow - Complete Encryption & SSS (Recommended: Maximum Security)
 
 1. **Launch GUI**: `python3 encoder.py -gui`
 2. **Random Fill**: Click **WORDS** button (generates 24 random words)
@@ -343,12 +364,16 @@ python3 encoder.py \
    - Click **GENERATE** for Offset
    - Click **GENERATE** for OTP
    - Click **GENERATE** for Prime
+   - **Write down** the generated offset, OTP, and prime on paper (store separately from shares)
 4. **Validate**: Click **VALIDATE** button (tests round-trip)
 5. **Create Shares**:
    - Enter N=5, K=3 in Shamir section
-   - Check **EMBED** checkbox
+   - **Leave EMBED checkbox UNCHECKED** (recommended for maximum security)
    - Click **ENCRYPT SSS**
 6. **Save Shares**: Copy shares from bottom text area to separate files/locations
+7. **Store Parameters Separately**: Keep offset/OTP/prime in a different secure location from the shares
+
+**Note**: If you check **EMBED**, the parameters will be included in the shares for convenience, but this reduces security (see `-embed` warning in Command-Line Arguments).
 
 ### Example 3: GUI Workflow - Decrypt from SSS Shares
 
@@ -397,19 +422,20 @@ python3 encoder.py -seed "able" -offset 100 -otp "password123" -i 1/1 -decrypt
 5. **Use Random Generation**: Let the tool generate offset, OTP, and prime (GENERATE buttons in GUI)
 6. **Validate First**: Always click **VALIDATE** button in GUI before creating SSS shares
 7. **Store Parameters Securely**: Write down offset, OTP, and prime on paper (never digitally)
-8. **Use Embedded SSS**: Check **EMBED** checkbox - less chance of losing parameters
+8. **⚠️ Avoid `-embed` for Maximum Security**: Do NOT check **EMBED** checkbox - store parameters separately for defense in depth. Only use `-embed` if you cannot reliably store offset/OTP/prime separately and understand the security trade-offs (see Command-Line Arguments section)
 9. **Distribute Shares**: Store shares in separate physical locations
-10. **Test Recovery**: Practice reconstructing from shares before relying on it (on test device)
-11. **Multiple Backups**: Create multiple SSS sets with different parameters
+10. **Separate Parameter Storage**: Keep offset/OTP/prime in different locations from shares (e.g., memorized, safety deposit box, secure note)
+11. **Test Recovery**: Practice reconstructing from shares before relying on it (on test device)
+12. **Multiple Backups**: Create multiple SSS sets with different parameters
 
 ### 🟢 Tool Usage
-12. **Verify Everything**: Enable **DEBUG** checkbox to see intermediate values
-13. **Use HELP**: Click **HELP** button in GUI for complete documentation
-14. **Random Fill for Testing**: Use Random **WORDS** or **NUMBERS** buttons to test functionality
-15. **Move Words Carefully**: **MOVE WORDS UP** button has confirmation - read it carefully
-16. **Clear Screen After Use**: Prevent shoulder surfing and camera recordings
-17. **Destroy Temporary Files**: Securely delete any files created
-18. **No Photos**: Never photograph the screen - cameras can be compromised too
+13. **Verify Everything**: Enable **DEBUG** checkbox to see intermediate values
+14. **Use HELP**: Click **HELP** button in GUI for complete documentation
+15. **Random Fill for Testing**: Use Random **WORDS** or **NUMBERS** buttons to test functionality
+16. **Move Words Carefully**: **MOVE WORDS UP** button has confirmation - read it carefully
+17. **Clear Screen After Use**: Prevent shoulder surfing and camera recordings
+18. **Destroy Temporary Files**: Securely delete any files created
+19. **No Photos**: Never photograph the screen - cameras can be compromised too
 
 ---
 
