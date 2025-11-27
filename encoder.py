@@ -65,7 +65,7 @@ from typing import List, Dict, Tuple
 from bip39_wordlist import BIP39_WORDS
 import sys
 import io
-from tkinter import Tk, Frame, Label, Entry, Button, Checkbutton, IntVar, messagebox, Toplevel, END, Canvas, Scrollbar
+from tkinter import Tk, Frame, Label, Entry, Button, Checkbutton, IntVar, messagebox, Toplevel, END, Canvas, Scrollbar, Listbox, SINGLE
 from tkinter.scrolledtext import ScrolledText
 
 # Dictionaries for 1-based indexing
@@ -535,10 +535,384 @@ def reconstruct_shamir_secret(shares: List[Tuple[int, List[Tuple[int, int]]]], p
     except UnicodeDecodeError:
         raise ValueError("Failed to decode reconstructed secret")
 
+class AutocompleteEntry:
+    """Provides autocomplete functionality for Entry widgets with BIP-39 wordlist."""
+
+    def __init__(self, entry_widget, wordlist, max_display=10):
+        self.entry = entry_widget
+        self.wordlist = sorted(wordlist)
+        self.max_display = max_display
+        self.listbox = None
+        self.listbox_visible = False
+        self.current_matches = []
+
+        # Bind events
+        self.entry.bind('<KeyRelease>', self.on_key_release)
+        self.entry.bind('<FocusIn>', self.on_focus_in)
+        self.entry.bind('<FocusOut>', self.on_focus_out)
+        self.entry.bind('<Down>', self.on_down_arrow)
+        self.entry.bind('<Up>', self.on_up_arrow)
+        self.entry.bind('<Return>', self.on_return)
+        self.entry.bind('<Escape>', self.on_escape)
+        self.entry.bind('<Tab>', self.on_tab)
+
+    def on_key_release(self, event):
+        """Handle key release events to show/update autocomplete suggestions."""
+        # Always update suggestions and validate for any key
+        # (except navigation keys that don't change content)
+        if event.keysym in ('Up', 'Down', 'Return', 'Escape', 'Tab'):
+            # These are handled by their own handlers
+            return
+
+        # For all other keys including Delete, BackSpace, and typing - update
+        self.update_suggestions()
+        self.validate_input()
+
+    def update_suggestions(self):
+        """Update the autocomplete suggestions based on current entry text."""
+        text = self.entry.get().strip().lower()
+
+        # If empty or is a number, hide suggestions
+        if not text or text.isdigit():
+            self.hide_listbox()
+            self.current_matches = []
+            return
+
+        # Filter matching words
+        matches = [word for word in self.wordlist if word.startswith(text)]
+        self.current_matches = matches
+
+        if matches:
+            self.show_suggestions(matches[:self.max_display])
+        else:
+            self.hide_listbox()
+
+    def validate_input(self):
+        """Validate the input and change background color if invalid."""
+        text = self.entry.get().strip()
+
+        if not text:
+            # Empty field - use default background
+            self.entry.config(bg='white')
+            return
+
+        # Check if it's a valid index (1-2048)
+        if text.isdigit():
+            try:
+                idx = int(text)
+                if 1 <= idx <= 2048:
+                    self.entry.config(bg='white')
+                else:
+                    self.entry.config(bg='#ffcccc')  # Light red
+            except ValueError:
+                self.entry.config(bg='#ffcccc')  # Light red
+            return
+
+        # Check if it's a valid BIP-39 word
+        text_lower = text.lower()
+        if text_lower in self.wordlist:
+            self.entry.config(bg='white')
+        else:
+            self.entry.config(bg='#ffcccc')  # Light red
+
+    def _calculate_listbox_position(self, num_items):
+        """Calculate optimal position for listbox (above or below entry) based on available space."""
+        x = self.entry.winfo_x()
+        entry_y = self.entry.winfo_y()
+        entry_height = self.entry.winfo_height()
+
+        # Estimate listbox height (approximately 20 pixels per item)
+        listbox_height = num_items * 20
+
+        # Get the parent frame's height
+        parent_height = self.entry.master.winfo_height()
+
+        # Calculate space below and above the entry
+        space_below = parent_height - (entry_y + entry_height)
+        space_above = entry_y
+
+        # Position below if there's enough space, otherwise position above
+        if space_below >= listbox_height or space_below >= space_above:
+            # Position below entry
+            y = entry_y + entry_height
+        else:
+            # Position above entry
+            y = entry_y - listbox_height
+
+        return x, y
+
+    def show_suggestions(self, matches):
+        """Display the autocomplete suggestion listbox, positioned above or below based on available space."""
+        num_items = min(len(matches), self.max_display)
+
+        if not self.listbox:
+            # Create listbox only if it doesn't exist
+            self.listbox = Listbox(self.entry.master, selectmode=SINGLE,
+                                  height=num_items,
+                                  exportselection=False,
+                                  takefocus=1)
+
+            # Position based on available space
+            x, y = self._calculate_listbox_position(num_items)
+            self.listbox.place(x=x, y=y, width=self.entry.winfo_width())
+
+            # Bind selection and keyboard events
+            self.listbox.bind('<<ListboxSelect>>', self.on_listbox_select)
+            self.listbox.bind('<Button-1>', self.on_listbox_click)
+            self.listbox.bind('<Return>', self.on_listbox_return)
+            self.listbox.bind('<Tab>', self.on_listbox_tab)
+            self.listbox.bind('<Up>', self.on_listbox_up)
+            self.listbox.bind('<Down>', self.on_listbox_down)
+            self.listbox.bind('<Escape>', self.on_listbox_escape)
+            self.listbox.bind('<KeyPress>', self.on_listbox_keypress)
+            self.listbox.bind('<FocusOut>', self.on_listbox_focus_out)
+        else:
+            # Listbox exists, update height first
+            self.listbox.config(height=num_items)
+
+            # Reposition based on available space
+            x, y = self._calculate_listbox_position(num_items)
+            self.listbox.place(x=x, y=y, width=self.entry.winfo_width())
+
+        # Update listbox contents (fast operation, no flickering)
+        self.listbox.delete(0, END)
+        for match in matches:
+            self.listbox.insert(END, match)
+
+        self.listbox_visible = True
+        # Lift to ensure it's visible on top
+        self.listbox.lift()
+
+    def hide_listbox(self, event=None):
+        """Hide the autocomplete suggestion listbox."""
+        if self.listbox:
+            try:
+                if self.listbox.winfo_ismapped():
+                    self.listbox.place_forget()
+                self.listbox_visible = False
+            except:
+                # Listbox was destroyed, reset state
+                self.listbox = None
+                self.listbox_visible = False
+
+    def on_focus_in(self, event):
+        """Handle focus in event - show suggestions if there's text."""
+        # When field gets focus, show suggestions for existing text
+        text = self.entry.get().strip()
+        if text and not text.isdigit():
+            self.update_suggestions()
+
+    def on_focus_out(self, event):
+        """Handle focus out event - convert number to word, hide listbox unless focus went to listbox."""
+        # Convert number to word if applicable
+        self.convert_index_to_word()
+        # Delay hiding to check where focus went
+        self.entry.after(100, self.check_focus_and_hide)
+
+    def check_focus_and_hide(self):
+        """Check if listbox has focus, if not hide it."""
+        try:
+            focused_widget = self.entry.focus_get()
+            if focused_widget != self.listbox:
+                self.hide_listbox()
+        except:
+            self.hide_listbox()
+
+    def convert_index_to_word(self):
+        """Convert BIP-39 index to word if entry contains a valid number."""
+        text = self.entry.get().strip()
+        if text.isdigit():
+            try:
+                idx = int(text)
+                if 1 <= idx <= 2048:
+                    word = INDEX_TO_WORD[idx]
+                    self.entry.delete(0, END)
+                    self.entry.insert(0, word)
+                    self.entry.config(bg='white')
+            except (ValueError, KeyError):
+                pass  # Invalid index, leave as is
+
+    def on_down_arrow(self, event):
+        """Handle down arrow key to navigate suggestions."""
+        if self.listbox_visible and self.listbox:
+            # Focus listbox and select first item
+            self.listbox.focus_set()
+            self.listbox.selection_clear(0, END)
+            self.listbox.selection_set(0)
+            self.listbox.activate(0)
+            self.listbox.see(0)  # Make sure first item is visible
+            return 'break'
+        return None
+
+    def on_up_arrow(self, event):
+        """Handle up arrow key to navigate to last suggestion."""
+        if self.listbox_visible and self.listbox:
+            # Focus listbox and select last item
+            self.listbox.focus_set()
+            self.listbox.selection_clear(0, END)
+            last_index = self.listbox.size() - 1
+            if last_index >= 0:
+                self.listbox.selection_set(last_index)
+                self.listbox.activate(last_index)
+                self.listbox.see(last_index)  # Make sure last item is visible
+            return 'break'
+        return None
+
+    def on_return(self, event):
+        """Handle return key to select highlighted suggestion."""
+        if self.listbox_visible and self.listbox:
+            selection = self.listbox.curselection()
+            if selection:
+                self.select_word(self.listbox.get(selection[0]))
+                return 'break'
+
+    def on_tab(self, event):
+        """Handle tab key to auto-complete and advance to next field."""
+        if self.listbox_visible and self.listbox:
+            # If listbox is visible, select first item or currently selected item
+            selection = self.listbox.curselection()
+            if selection:
+                self.select_word(self.listbox.get(selection[0]), advance_focus=True)
+            elif self.current_matches:
+                # Select first match
+                self.select_word(self.current_matches[0], advance_focus=True)
+            # Don't return 'break' - allow Tab to advance to next widget
+            return
+        elif self.current_matches and len(self.current_matches) == 1:
+            # If only one match exists, auto-fill it
+            self.select_word(self.current_matches[0], advance_focus=True)
+            # Don't return 'break' - allow Tab to advance to next widget
+            return
+        else:
+            # No matches - convert index to word if applicable
+            self.convert_index_to_word()
+
+    def on_escape(self, event):
+        """Handle escape key to hide suggestions."""
+        if self.listbox_visible:
+            self.hide_listbox()
+            return 'break'
+
+    def on_listbox_select(self, event):
+        """Handle listbox selection."""
+        # This is triggered by keyboard navigation
+        pass
+
+    def on_listbox_click(self, event):
+        """Handle mouse click on listbox item."""
+        if self.listbox:
+            # Get the clicked item
+            index = self.listbox.nearest(event.y)
+            if index >= 0:
+                word = self.listbox.get(index)
+                self.select_word(word)
+
+    def on_listbox_return(self, event):
+        """Handle Return key pressed in listbox."""
+        if self.listbox:
+            selection = self.listbox.curselection()
+            if selection:
+                word = self.listbox.get(selection[0])
+                self.select_word(word)
+                return 'break'
+
+    def on_listbox_tab(self, event):
+        """Handle Tab key pressed in listbox to select and advance."""
+        if self.listbox:
+            selection = self.listbox.curselection()
+            if selection:
+                word = self.listbox.get(selection[0])
+                self.select_word(word, advance_focus=True)
+            elif self.current_matches:
+                # Select first match
+                self.select_word(self.current_matches[0], advance_focus=True)
+            # Return 'break' to prevent default Tab behavior, we handle focus manually
+            return 'break'
+
+    def on_listbox_up(self, event):
+        """Handle Up arrow in listbox."""
+        if self.listbox:
+            current_selection = self.listbox.curselection()
+            if current_selection:
+                current_index = current_selection[0]
+                if current_index == 0:
+                    # At top of list, return focus to entry
+                    self.entry.focus_set()
+                    self.entry.icursor(END)
+                    return 'break'
+                else:
+                    # Move to previous item
+                    self.listbox.selection_clear(0, END)
+                    self.listbox.selection_set(current_index - 1)
+                    self.listbox.activate(current_index - 1)
+                    self.listbox.see(current_index - 1)
+                    return 'break'
+
+    def on_listbox_down(self, event):
+        """Handle Down arrow in listbox."""
+        if self.listbox:
+            current_selection = self.listbox.curselection()
+            if current_selection:
+                current_index = current_selection[0]
+                # Move to next item if not at end
+                if current_index < self.listbox.size() - 1:
+                    self.listbox.selection_clear(0, END)
+                    self.listbox.selection_set(current_index + 1)
+                    self.listbox.activate(current_index + 1)
+                    self.listbox.see(current_index + 1)
+                    return 'break'
+
+    def on_listbox_escape(self, event):
+        """Handle Escape in listbox."""
+        self.hide_listbox()
+        self.entry.focus_set()
+        return 'break'
+
+    def on_listbox_keypress(self, event):
+        """Handle typing in listbox - pass back to entry."""
+        # If user types a regular character while in listbox, return to entry
+        if event.char and event.char.isprintable() and not event.char.isspace():
+            self.entry.focus_set()
+            # Insert the character at the end of entry
+            self.entry.insert(END, event.char)
+            return 'break'
+
+    def on_listbox_focus_out(self, event):
+        """Handle listbox losing focus."""
+        # Delay to check where focus went
+        if self.listbox:
+            self.listbox.after(100, self.check_listbox_focus_and_hide)
+
+    def check_listbox_focus_and_hide(self):
+        """Check if entry has focus, if not hide listbox."""
+        try:
+            if self.listbox:
+                focused_widget = self.listbox.focus_get()
+                if focused_widget != self.entry and focused_widget != self.listbox:
+                    self.hide_listbox()
+        except:
+            self.hide_listbox()
+
+    def select_word(self, word, advance_focus=False):
+        """Insert the selected word into the entry and hide suggestions."""
+        self.entry.delete(0, END)
+        self.entry.insert(0, word)
+        self.entry.config(bg='white')  # Valid word, set white background
+        self.hide_listbox()
+
+        if advance_focus:
+            # Return focus to entry so Tab can naturally advance to next widget
+            self.entry.focus_set()
+            # Generate a Tab event to move to next widget
+            self.entry.tk_focusNext().focus_set()
+        else:
+            # Keep focus on current entry
+            self.entry.focus_set()
+
 def run_gui():
     root = Tk()
     root.title("Seed Phrase Encryptor")
-    root.geometry("1000x800")
+    root.geometry("1000x700")
 
     # Create main frame container
     main_container = Frame(root)
@@ -565,22 +939,61 @@ def run_gui():
     scrollbar.pack(side="right", fill="y")
     canvas.pack(side="left", fill="both", expand=True)
 
-    # Mousewheel scrolling support
+    # Mousewheel scrolling - Mac best practices: use delta directly
     def on_mousewheel(event):
-        canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-        return "break"  # Prevent event propagation
+        # Check if we're over a scrollable text widget
+        widget_class = event.widget.winfo_class()
+        if widget_class == 'Text':
+            return
+
+        # Check scroll position FIRST
+        yview = canvas.yview()
+        at_top = yview[0] <= 0.0
+        at_bottom = yview[1] >= 0.9999
+
+        # Use delta directly for smooth Mac scrolling (best practice)
+        # Mac sends small delta values (1, -1) which work well with trackpad
+        if event.delta > 0:  # Scroll up
+            if at_top:
+                return "break"
+        elif event.delta < 0:  # Scroll down
+            if at_bottom:
+                return "break"
+
+        # Scroll using negative delta directly for natural direction
+        canvas.yview_scroll(-event.delta, "units")
 
     def on_mousewheel_linux(event):
-        if event.num == 4:
-            canvas.yview_scroll(-1, "units")
-        elif event.num == 5:
-            canvas.yview_scroll(1, "units")
-        return "break"  # Prevent event propagation
+        widget_class = event.widget.winfo_class()
+        if widget_class == 'Text':
+            return
 
-    # Bind mousewheel to the root window so it works everywhere
-    root.bind_all("<MouseWheel>", on_mousewheel)
-    root.bind_all("<Button-4>", on_mousewheel_linux)
-    root.bind_all("<Button-5>", on_mousewheel_linux)
+        yview = canvas.yview()
+        at_top = yview[0] <= 0.0
+        at_bottom = yview[1] >= 0.9999
+
+        if event.num == 4:  # Scroll up
+            if at_top:
+                return "break"
+            canvas.yview_scroll(-1, "units")
+        elif event.num == 5:  # Scroll down
+            if at_bottom:
+                return "break"
+            canvas.yview_scroll(1, "units")
+
+    # Bind when canvas is entered (best practice pattern)
+    def on_canvas_enter(event):
+        canvas.bind_all("<MouseWheel>", on_mousewheel)
+        canvas.bind_all("<Button-4>", on_mousewheel_linux)
+        canvas.bind_all("<Button-5>", on_mousewheel_linux)
+
+    def on_canvas_leave(event):
+        canvas.unbind_all("<MouseWheel>")
+        canvas.unbind_all("<Button-4>")
+        canvas.unbind_all("<Button-5>")
+
+    canvas.bind('<Enter>', on_canvas_enter)
+    canvas.bind('<Leave>', on_canvas_leave)
 
     # Top buttons frame with Random Fill and Show BIP
     top_buttons_frame = Frame(inner_frame)
@@ -631,7 +1044,7 @@ def run_gui():
     num_words_entry = Entry(top_buttons_frame, width=5)
     num_words_entry.pack(side="left")
     num_words_entry.insert(0, "24")  # Default to 24 words
-    Button(top_buttons_frame, text="SHOW BIP", command=lambda: show_bip()).pack(side="left", padx=5)
+    Button(top_buttons_frame, text="SHOW BIP-39 WORDS", command=lambda: show_bip()).pack(side="left", padx=5)
     Button(top_buttons_frame, text="HELP", command=lambda: show_help()).pack(side="left", padx=5)
 
     # Seed words frame
@@ -639,21 +1052,26 @@ def run_gui():
     seed_frame.pack(pady=10)
     Label(seed_frame, text="Seed Phrase Words or BIP-39 indices (e.g. 10 = abuse). Please enter words/indices randomly so keystroke loggers do not obtain your direct pass phrase.").grid(row=0, column=0, columnspan=4)
     word_entries = []
-    for i in range(12):
-        for j in range(2):
-            idx = i * 2 + j + 1
+    autocomplete_widgets = []
+    # Create entries in vertical order (column by column) so tab moves vertically
+    for j in range(2):  # columns
+        for i in range(12):  # rows
+            idx = j * 12 + i + 1
             if idx > 24:
                 break
             Label(seed_frame, text=f"Word {idx}:").grid(row=i+1, column=j*2, sticky="e")
             e = Entry(seed_frame, width=20)
             e.grid(row=i+1, column=j*2+1, sticky="w")
             word_entries.append(e)
+            # Add autocomplete to each entry
+            autocomplete = AutocompleteEntry(e, BIP39_WORDS)
+            autocomplete_widgets.append(autocomplete)
     Button(seed_frame, text="CLEAR ALL", command=lambda: [e.delete(0, END) for e in word_entries]).grid(row=13, column=0, columnspan=4)
 
     # Parameters frame
     param_frame = Frame(inner_frame)
     param_frame.pack(pady=10)
-    Label(param_frame, text="These 3 parameters are critical for decrypting your data, please store them securely. Otherwise, your encrypted information will be lost.").grid(row=0, column=0, columnspan=3)
+    Label(param_frame, text="These 2 parameters are critical for decrypting your data, please store them securely. Otherwise, your encrypted information will be lost.").grid(row=0, column=0, columnspan=3)
 
     Label(param_frame, text="Offset:").grid(row=1, column=0)
     offset_entry = Entry(param_frame)
@@ -669,11 +1087,6 @@ def run_gui():
         otp_entry.delete(0, END)
         otp_entry.insert(0, random_otp)
     Button(param_frame, text="GENERATE", command=gen_otp).grid(row=2, column=2)
-
-    Label(param_frame, text="Prime:").grid(row=3, column=0)
-    prime_entry = Entry(param_frame)
-    prime_entry.grid(row=3, column=1)
-    Button(param_frame, text="GENERATE", command=lambda: (prime_entry.delete(0, END), prime_entry.insert(0, str(get_random_prime())))).grid(row=3, column=2)
 
     # Buttons frame
     buttons_frame = Frame(inner_frame)
@@ -860,28 +1273,59 @@ def run_gui():
         finally:
             sys.stdout = original_stdout
 
-        # Step 5: Compare original and decrypted words
-        if original_words == decrypted_words:
-            # Restore original words to the fields
-            for e in word_entries:
-                e.delete(0, END)
-            for i, word in enumerate(original_words):
-                word_entries[i].insert(0, word)
+        # Step 5: Compare original and decrypted words and show detailed results
+        # Restore original words to the fields
+        for e in word_entries:
+            e.delete(0, END)
+        for i, word in enumerate(original_words):
+            word_entries[i].insert(0, word)
 
-            messagebox.showinfo(
-                "Validation Successful",
-                f"✓ Round-trip validation passed!\n\n"
-                f"Original words: {len(original_words)}\n"
-                f"Encrypted → Decrypted successfully\n"
-                f"All words match!"
-            )
+        # Create results window
+        results_win = Toplevel()
+        results_win.title("Validation Results")
+        results_win.geometry("700x500")
+
+        # Header
+        header_frame = Frame(results_win)
+        header_frame.pack(pady=10)
+
+        if original_words == decrypted_words:
+            status_text = "✓ Round-trip validation PASSED!"
+            status_color = "green"
         else:
-            messagebox.showerror(
-                "Validation Failed",
-                f"✗ Round-trip validation FAILED!\n\n"
-                f"Original and decrypted words do not match.\n"
-                f"Check your offset and OTP parameters."
-            )
+            status_text = "✗ Round-trip validation FAILED!"
+            status_color = "red"
+
+        Label(header_frame, text=status_text, font=("Arial", 14, "bold"), fg=status_color).pack()
+        Label(header_frame, text=f"Words validated: {len(original_words)}").pack()
+
+        # Results display with table format
+        results_text = ScrolledText(results_win, width=90, height=25, font=("Courier", 10))
+        results_text.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Table header
+        results_text.insert(END, "Word-by-Word Transformation:\n")
+        results_text.insert(END, "=" * 85 + "\n")
+        results_text.insert(END, f"{'#':<4} {'Original':<15} {'Encrypted':<15} {'Decrypted':<15} {'Match':<10}\n")
+        results_text.insert(END, "-" * 85 + "\n")
+
+        # Table rows
+        for i in range(len(original_words)):
+            match_status = "✓" if original_words[i] == decrypted_words[i] else "✗ FAIL"
+            results_text.insert(END,
+                f"{i+1:<4} {original_words[i]:<15} {encrypted_words[i]:<15} {decrypted_words[i]:<15} {match_status:<10}\n")
+
+        results_text.insert(END, "=" * 85 + "\n")
+        results_text.insert(END, f"\nParameters used:\n")
+        results_text.insert(END, f"  Offset: {offset}\n")
+        results_text.insert(END, f"  OTP: {used_otp}\n")
+        if position:
+            results_text.insert(END, f"  Position: {position[0]}/{position[1]}\n")
+
+        results_text.config(state="disabled")
+
+        # Close button
+        Button(results_win, text="CLOSE", command=results_win.destroy, width=15).pack(pady=10)
 
     Button(buttons_frame, text="VALIDATE", command=validate_encryption).pack(side="left", padx=5)
 
@@ -893,7 +1337,7 @@ def run_gui():
     # Shamir section
     shamir_frame = Frame(inner_frame)
     shamir_frame.pack(pady=10)
-    Label(shamir_frame, text="Shamir Secret Sharing:").grid(row=0, column=0, columnspan=4)
+    Label(shamir_frame, text="Shamir Secret Sharing:").grid(row=0, column=0, columnspan=6)
 
     Label(shamir_frame, text="Total Shares (N):").grid(row=1, column=0)
     n_entry = Entry(shamir_frame, width=5)
@@ -905,6 +1349,11 @@ def run_gui():
 
     embed_var = IntVar()
     Checkbutton(shamir_frame, text="EMBED", variable=embed_var).grid(row=1, column=4)
+
+    Label(shamir_frame, text="Prime:").grid(row=2, column=0)
+    prime_entry = Entry(shamir_frame, width=20)
+    prime_entry.grid(row=2, column=1, columnspan=2)
+    Button(shamir_frame, text="GENERATE", command=lambda: (prime_entry.delete(0, END), prime_entry.insert(0, str(get_random_prime())))).grid(row=2, column=3)
 
     def on_encrypt_sss():
         try:
@@ -1063,8 +1512,8 @@ def run_gui():
         finally:
             sys.stdout = original_stdout
 
-    Button(shamir_frame, text="ENCRYPT SSS", command=on_encrypt_sss).grid(row=2, column=0, columnspan=2)
-    Button(shamir_frame, text="DECRYPT SSS", command=on_decrypt_sss).grid(row=2, column=2, columnspan=3)
+    Button(shamir_frame, text="ENCRYPT SSS", command=on_encrypt_sss).grid(row=3, column=0, columnspan=2)
+    Button(shamir_frame, text="DECRYPT SSS", command=on_decrypt_sss).grid(row=3, column=2, columnspan=3)
 
     # Shamir output
     shamir_text = ScrolledText(inner_frame, width=80, height=30)
@@ -1173,8 +1622,39 @@ def on_sss_decrypt(root, word_entries, offset_entry, otp_entry, prime_entry, deb
 def show_bip():
     bip_win = Toplevel()
     bip_win.title("BIP-39 Wordlist")
-    bip_text = ScrolledText(bip_win, width=160, height=60)
+    bip_win.geometry("1100x700")
+
+    # Font size control
+    current_font_size = [12]
+
+    # Buttons at bottom - pack first to ensure visibility
+    button_frame = Frame(bip_win)
+    button_frame.pack(side="bottom", pady=5)
+
+    # Text area with both scrollbars
+    text_frame = Frame(bip_win)
+    text_frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+    # Vertical scrollbar
+    v_scrollbar = Scrollbar(text_frame)
+    v_scrollbar.pack(side="right", fill="y")
+
+    # Horizontal scrollbar
+    h_scrollbar = Scrollbar(text_frame, orient="horizontal")
+    h_scrollbar.pack(side="bottom", fill="x")
+
+    # Text widget with both scrollbars
+    from tkinter import Text
+    bip_text = Text(text_frame, width=120, wrap="none",
+                    font=("Courier", current_font_size[0]),
+                    yscrollcommand=v_scrollbar.set,
+                    xscrollcommand=h_scrollbar.set)
     bip_text.pack(fill="both", expand=True)
+
+    v_scrollbar.config(command=bip_text.yview)
+    h_scrollbar.config(command=bip_text.xview)
+
+    # Generate wordlist content
     original_stdout = sys.stdout
     out = io.StringIO()
     sys.stdout = out
@@ -1182,6 +1662,21 @@ def show_bip():
     sys.stdout = original_stdout
     bip_text.insert(END, out.getvalue())
     bip_text.config(state="disabled")
+
+    # Font size adjustment functions
+    def increase_font():
+        current_font_size[0] += 2
+        bip_text.config(font=("Courier", current_font_size[0]))
+
+    def decrease_font():
+        if current_font_size[0] > 6:
+            current_font_size[0] -= 2
+            bip_text.config(font=("Courier", current_font_size[0]))
+
+    # Add buttons to frame
+    Button(button_frame, text="+", command=increase_font, width=3).pack(side="left", padx=2)
+    Button(button_frame, text="-", command=decrease_font, width=3).pack(side="left", padx=2)
+    Button(button_frame, text="CLOSE", command=bip_win.destroy, width=15).pack(side="left", padx=5)
 
 def get_help_text():
     """Generate the command-line help text."""
@@ -1312,7 +1807,12 @@ def show_help():
     # Font size control
     current_font_size = [12]  # Use list to allow modification in nested functions
 
-    help_text = ScrolledText(help_win, width=110, height=40, wrap="word", font=("Courier", 12))
+    # Buttons frame at bottom - pack first to ensure visibility
+    button_frame = Frame(help_win)
+    button_frame.pack(side="bottom", pady=5)
+
+    # Text area fills remaining space
+    help_text = ScrolledText(help_win, width=110, wrap="word", font=("Courier", 12))
     help_text.pack(fill="both", expand=True, padx=10, pady=10)
 
     # Add the code description from the top of the file
@@ -1393,9 +1893,7 @@ Features:
             current_font_size[0] -= 2
             help_text.config(font=("Courier", current_font_size[0]))
 
-    # Buttons frame
-    button_frame = Frame(help_win)
-    button_frame.pack(pady=5)
+    # Add buttons to the frame (already created above)
     Button(button_frame, text="+", command=increase_font, width=3).pack(side="left", padx=2)
     Button(button_frame, text="-", command=decrease_font, width=3).pack(side="left", padx=2)
     Button(button_frame, text="CLOSE", command=help_win.destroy).pack(side="left", padx=5)

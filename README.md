@@ -153,7 +153,15 @@ python3 encoder.py -gui
 
 **User Interface:**
 - Scrollable interface (900x800 window)
-- 24 word entry fields (supports 1, 12, or 24 words)
+- 24 word entry fields with **vertical layout** (Words 1-12 left column, 13-24 right column)
+- **Vertical tab navigation** - Press Tab to move down through fields (1→2→3...→12→13→14...→24)
+- **Smart autocomplete** for BIP-39 words:
+  - Type any letters to see matching word suggestions
+  - Suggestions position above/below based on available space (no cutoff)
+  - Press **Down arrow** (↓) to jump to first suggestion
+  - Press **Up arrow** (↑) to jump to last suggestion
+  - Input validation with color feedback (red background for invalid entries)
+  - Accepts both word names and indices (1-2048)
 - BIP-39 wordlist viewer (10 columns, 2048 words)
 - Clear log buttons for output areas
 - Confirmation dialogs for destructive operations
@@ -219,8 +227,10 @@ python3 encoder.py -sf shares.txt \
 #### View BIP-39 wordlist
 
 ```bash
-python3 encoder.py -bip 4  # Display in 4 columns
+python3 encoder.py -bip 4  # Display in 4 columns (numbered vertically)
 ```
+
+The wordlist is numbered 1-2048, filling columns vertically (top to bottom) then moving to the next column.
 
 ### Share File Format
 
@@ -299,7 +309,7 @@ This encrypts "annual" using the 23rd character of the OTP, treating it as a 24-
 | `-sf FILE` | Reconstruct from Shamir shares file |
 | `-decrypt` | Decrypt instead of encrypt |
 | `-i X/Y` | Use OTP character at position X for Y-word phrase |
-| `-bip X` | Print BIP-39 wordlist in X columns |
+| `-bip X` | Print BIP-39 wordlist in X columns (numbered vertically) |
 | `-debug` | Show intermediate cipher values |
 | `-gui` | Launch graphical interface |
 
